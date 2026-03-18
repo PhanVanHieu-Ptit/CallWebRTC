@@ -110,9 +110,8 @@ module.exports = (io, socket) => {
     socket.join(roomId);
     socket.currentRoom = roomId;
 
-    // Find callee socket
-    const calleeSocketId = roomService.getSocketId(targetUserId);
-    if (!calleeSocketId) {
+    // Check if callee is online (any tab/device)
+    if (!roomService.isOnline(targetUserId)) {
       socket.emit(CALL_ERROR, {
         code: "USER_OFFLINE",
         message: "The user you are calling is offline",
@@ -120,8 +119,8 @@ module.exports = (io, socket) => {
       return;
     }
 
-    // Forward to callee
-    io.to(calleeSocketId).emit(INCOMING_CALL, {
+    // Forward to ALL callee sockets (all tabs/devices) via personal room
+    io.to(`user:${targetUserId}`).emit(INCOMING_CALL, {
       callId: payload.callId,
       callerId: userId,
       callerName: callerName || userId,
@@ -132,12 +131,13 @@ module.exports = (io, socket) => {
 
     // Auto-timeout: if callee doesn't answer within 30s, notify caller
     const timeout = setTimeout(() => {
-      const calleeStillOffline = !io.sockets.adapter.rooms
-        .get(roomId)
-        ?.has(calleeSocketId);
-      if (calleeStillOffline) {
+      const roomMembers = io.sockets.adapter.rooms.get(roomId);
+      const calleeJoined = roomService
+        .getAllSocketIds(targetUserId)
+        .some((sid) => roomMembers?.has(sid));
+      if (!calleeJoined) {
         socket.emit(CALL_REJECTED, { reason: "timeout" });
-        io.to(calleeSocketId).emit(CALL_ENDED, {
+        io.to(`user:${targetUserId}`).emit(CALL_ENDED, {
           endedBy: "system",
           reason: "timeout",
         });
@@ -146,7 +146,7 @@ module.exports = (io, socket) => {
 
     // Clear timeout if callee joins the room (accepts)
     socket._callTimeout = timeout;
-  });
+  };);
 
   // ── Call acceptance ─────────────────────────────────────────────────────
   /**
@@ -173,19 +173,18 @@ module.exports = (io, socket) => {
     socket.join(roomId);
     socket.currentRoom = roomId;
 
-    // Forward answer to caller
-    const callerSocketId = roomService.getSocketId(callerId);
-    if (callerSocketId) {
-      io.to(callerSocketId).emit(CALL_ANSWERED, { answer });
+    // Forward answer to ALL caller sockets
+    io.to(`user:${callerId}`).emit(CALL_ANSWERED, { answer });
 
-      // Clear call timeout since callee answered
-      const callerSocket = io.sockets.sockets.get(callerSocketId);
+    // Clear call timeout since callee answered
+    for (const sid of roomService.getAllSocketIds(callerId)) {
+      const callerSocket = io.sockets.sockets.get(sid);
       if (callerSocket?._callTimeout) {
         clearTimeout(callerSocket._callTimeout);
         delete callerSocket._callTimeout;
       }
     }
-  });
+  };);
 
   // ── Call rejection ──────────────────────────────────────────────────────
   /**
@@ -199,18 +198,18 @@ module.exports = (io, socket) => {
 
     console.log(`[RTC] ${userId} → reject-call (caller: ${callerId})`);
 
-    const callerSocketId = roomService.getSocketId(callerId);
-    if (callerSocketId) {
-      io.to(callerSocketId).emit(CALL_REJECTED, { reason: "declined" });
+    // Notify ALL caller sockets
+    io.to(`user:${callerId}`).emit(CALL_REJECTED, { reason: "declined" });
 
-      // Clear call timeout since callee responded
-      const callerSocket = io.sockets.sockets.get(callerSocketId);
+    // Clear call timeout since callee responded
+    for (const sid of roomService.getAllSocketIds(callerId)) {
+      const callerSocket = io.sockets.sockets.get(sid);
       if (callerSocket?._callTimeout) {
         clearTimeout(callerSocket._callTimeout);
         delete callerSocket._callTimeout;
       }
     }
-  });
+  };);
 
   // ── Call termination ────────────────────────────────────────────────────
   /**
