@@ -66,6 +66,18 @@ const roomService = {
     const sockets = userSockets.get(userId);
     return !!(sockets && sockets.size > 0);
   },
+
+  /**
+   * Get all connected users and their socket IDs (for debugging).
+   * @returns {Record<string, string[]>}
+   */
+  getAllConnections() {
+    const result = {};
+    for (const [userId, sockets] of userSockets) {
+      result[userId] = [...sockets];
+    }
+    return result;
+  },
 };
 
 module.exports = roomService;

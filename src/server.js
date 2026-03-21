@@ -16,6 +16,22 @@ app.get('/health', (_req, res) => {
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// ── Debug: connected users (remove in production) ────────────────────────────
+app.get('/debug/connections', (_req, res) => {
+  const roomService = require('./socket/roomService');
+  const connections = roomService.getAllConnections();
+  const io = server.__io;
+  const rooms = {};
+  if (io) {
+    for (const [name, members] of io.sockets.adapter.rooms) {
+      if (name.startsWith('user:')) {
+        rooms[name] = [...members];
+      }
+    }
+  }
+  res.json({ connections, rooms, timestamp: new Date().toISOString() });
+});
+
 // ── Internal API key middleware ───────────────────────────────────────────────
 // Used by backend-api to push call events (call:incoming, call:accepted, etc.)
 // into the signaling service without a WebSocket connection.
@@ -52,7 +68,13 @@ app.post('/internal/notify-call', requireInternalKey, (req, res) => {
   }
 
   // Route to the personal room created for each authenticated user
-  io.to(`user:${targetUserId}`).emit(event, payload ?? {});
+  const targetRoom = `user:${targetUserId}`;
+  const roomMembers = io.sockets.adapter.rooms.get(targetRoom);
+  console.log(
+    `[RTC internal] → ${event} to ${targetRoom} — sockets in room: ${roomMembers ? [...roomMembers].join(", ") : "NONE (user offline or not connected to this instance)"}`,
+  );
+
+  io.to(targetRoom).emit(event, payload ?? {});
 
   console.log(`[RTC internal] → ${event} to user:${targetUserId}`);
   res.status(200).json({ delivered: true });
