@@ -62,6 +62,10 @@ module.exports = (io, socket) => {
   // Join a personal room so backend / rtc-service can send targeted notifications
   socket.join(`user:${userId}`);
 
+  console.log(`[RTC] user:${userId} room has sockets:`, [
+    ...(io.sockets.adapter.rooms.get(`user:${userId}`) ?? []),
+  ]);
+
   // ── Generic room management (for mesh group calls) ──────────────────────
 
   socket.on(JOIN_ROOM, (payload) => {
@@ -111,6 +115,11 @@ module.exports = (io, socket) => {
     socket.currentRoom = roomId;
 
     // Check if callee is online (any tab/device)
+    const calleeRoom = io.sockets.adapter.rooms.get(`user:${targetUserId}`);
+    console.log(
+      `[RTC] Routing to user:${targetUserId} — room members: ${calleeRoom ? [...calleeRoom].join(", ") : "NONE — user is offline or room missing"}`,
+    );
+
     if (!roomService.isOnline(targetUserId)) {
       socket.emit(CALL_ERROR, {
         code: "USER_OFFLINE",
@@ -146,7 +155,7 @@ module.exports = (io, socket) => {
 
     // Clear timeout if callee joins the room (accepts)
     socket._callTimeout = timeout;
-  };);
+  });
 
   // ── Call acceptance ─────────────────────────────────────────────────────
   /**
@@ -184,7 +193,7 @@ module.exports = (io, socket) => {
         delete callerSocket._callTimeout;
       }
     }
-  };);
+  });
 
   // ── Call rejection ──────────────────────────────────────────────────────
   /**
@@ -209,7 +218,7 @@ module.exports = (io, socket) => {
         delete callerSocket._callTimeout;
       }
     }
-  };);
+  });
 
   // ── Call termination ────────────────────────────────────────────────────
   /**
